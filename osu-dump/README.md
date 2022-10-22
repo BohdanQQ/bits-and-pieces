@@ -39,5 +39,4 @@ collect and summarize user plays data.
 * proper terminal output format
 * more stats / information about user's plays
 * possibly other sane output options
-* parametrize api limiting (with OK default for normal API)
 * parallelize API requests, crunch data on the fly
