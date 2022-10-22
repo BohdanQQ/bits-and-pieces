@@ -1,5 +1,6 @@
 use crate::cli::{BeatmapMode, Cli};
 use crate::model::{OutputBeatmap, OutputBeatmapSet, ReplayCount};
+use crate::utils::verbose_println;
 use clap::Parser;
 use std::boxed::Box;
 use std::collections::{HashMap, HashSet};
@@ -14,6 +15,13 @@ mod utils;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Cli::parse();
+    verbose_println(
+        &args,
+        format!(
+            "API base: {}, API Limit: {:?}",
+            args.api_url_base, args.request_limit
+        ),
+    );
     match args.command {
         cli::Commands::MostPlayed { limit, ref modes } => {
             most_played_command(&args, limit, modes).await?
@@ -27,10 +35,10 @@ async fn most_played_command(
     limit: Option<u16>,
     modes: &Vec<BeatmapMode>,
 ) -> Result<(), Box<dyn Error>> {
-    utils::verbose_print(spec, "Collecting most played beatmaps...");
+    verbose_println(spec, "Collecting most played beatmaps...");
     let most_played = get_most_played(spec, limit).await?;
 
-    utils::verbose_print(spec, "Data collected, processing data...");
+    verbose_println(spec, "Data collected, processing data...");
     let summarized_data = summarize_most_played(most_played, limit, modes);
 
     if spec.output.is_some() {
@@ -222,15 +230,18 @@ async fn get_most_played(
     let mut offset = 0;
     const PAGE_SIZE: u32 = 100;
 
+    let mut limiter = utils::OsuAPILimiter::new(
+        spec.request_limit.requests,
+        spec.request_limit.timeframe_secs,
+    );
     loop {
         let url = format!(
             "{}/users/{}/beatmapsets/most_played?limit={}&offset={}",
             spec.api_url_base, spec.user_id, PAGE_SIZE, offset
         );
-        utils::verbose_print(spec, format!("URL: {}", url));
 
         let mut resp: Vec<ReplayCount> =
-            utils::exponential_wait_request_attempt(spec, &url, 3).await?;
+            utils::exponential_wait_request_attempt(spec, &url, 3, &mut limiter).await?;
 
         if resp.is_empty() {
             break;

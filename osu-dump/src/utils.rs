@@ -12,9 +12,13 @@ mod cli;
 #[path = "./model.rs"]
 mod model;
 
-const MAX_REQUESTS_PER_MINUTE: usize = 50;
-
 pub fn verbose_print<T: Display>(spec: &Cli, message: T) {
+    if spec.verbose {
+        print!("{}", message);
+    }
+}
+
+pub fn verbose_println<T: Display>(spec: &Cli, message: T) {
     if spec.verbose {
         println!("{}", message);
     }
@@ -25,11 +29,11 @@ async fn wait_on_limiter(spec: &Cli, limiter: &OsuAPILimiter) {
     if wait_time.is_zero() {
         return;
     }
-    verbose_print(
+    verbose_println(
         spec,
         format!(
             "Sleeping on API limit ({}) for {} seconds",
-            MAX_REQUESTS_PER_MINUTE,
+            spec.request_limit.requests,
             wait_time.as_secs()
         ),
     );
@@ -40,22 +44,26 @@ pub async fn exponential_wait_request_attempt<D: for<'a> Deserialize<'a>>(
     spec: &Cli,
     url: &str,
     max_retries: u32,
+    limiter: &mut OsuAPILimiter,
 ) -> Result<D, Box<dyn Error>> {
     let mut retry_count = 0;
     let mut last_error: Box<dyn Error> = Box::new(std::io::Error::new(
         ErrorKind::Unsupported,
         "This error should never propagate!",
     ));
-    let mut limiter = OsuAPILimiter::new(MAX_REQUESTS_PER_MINUTE);
 
     while retry_count <= max_retries {
-        wait_on_limiter(spec, &limiter).await;
+        wait_on_limiter(spec, limiter).await;
+
+        verbose_print(spec, format!("GET {}", url));
         let raw_response = reqwest::get(url).await;
+        verbose_println(spec, " finished");
+
         limiter.register_request_performed();
         let json_result = match raw_response {
             Ok(r) => r.json::<D>().await,
             Err(e) => {
-                verbose_print(
+                verbose_println(
                     spec,
                     format!(
                         "Error when performing a request!\nError: {}\nRetry counter: {}\\{}",
@@ -72,7 +80,7 @@ pub async fn exponential_wait_request_attempt<D: for<'a> Deserialize<'a>>(
         match json_result {
             Ok(json) => return Ok(json),
             Err(e) => {
-                verbose_print(
+                verbose_println(
                     spec,
                     format!(
                         "Error when performing a request!\nError: {}\nRetry counter: {}\\{}",
@@ -89,21 +97,23 @@ pub async fn exponential_wait_request_attempt<D: for<'a> Deserialize<'a>>(
     Err(last_error)
 }
 
-struct OsuAPILimiter {
-    limit: usize,
+pub struct OsuAPILimiter {
+    limit: u16,
+    timeframe_secs: u16,
     starts: VecDeque<Instant>,
 }
 
 impl OsuAPILimiter {
-    pub fn new(limit: usize) -> Self {
+    pub fn new(limit: u16, timeframe_secs: u16) -> Self {
         OsuAPILimiter {
             limit,
+            timeframe_secs,
             starts: VecDeque::new(),
         }
     }
 
     pub fn time_until_next_request(&self) -> Duration {
-        if self.starts.len() < self.limit {
+        if self.limit == 0 || self.starts.len() < usize::from(self.limit) {
             return Duration::new(0, 0);
         }
         const MICROS_MINUTE: u128 = 60 * 1000 * 1000;
@@ -119,16 +129,21 @@ impl OsuAPILimiter {
         let micros_until_request_allowed = MICROS_MINUTE - furthest_instant.elapsed().as_micros();
         let seconds_until_request_allowed = (micros_until_request_allowed / 1000 / 1000) + 1;
 
-        let u64_seconds_until_request_allowed = if seconds_until_request_allowed > 60 {
-            60
-        } else {
-            seconds_until_request_allowed as u64
-        };
+        let u64_seconds_until_request_allowed =
+            if seconds_until_request_allowed > u128::from(self.timeframe_secs) {
+                u64::from(self.timeframe_secs)
+            } else {
+                seconds_until_request_allowed as u64
+            };
         Duration::new(u64_seconds_until_request_allowed, 0)
     }
 
     pub fn register_request_performed(&mut self) {
-        if self.starts.len() >= self.limit {
+        if self.limit == 0 {
+            return;
+        }
+
+        if self.starts.len() >= usize::from(self.limit) {
             self.starts.pop_front();
         }
 
