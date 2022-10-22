@@ -58,7 +58,7 @@ pub enum Commands {
     MostPlayed {
         /// Limits the amount of beatmaps outputted. LIMITS ACCURACY because not all data will be fetched from the Osu! API.
         #[arg(short, long)]
-        limit: Option<u16>,
+        limit: Option<u64>,
 
         #[clap(help("Osu beatmap modes to filter. Accepts all by default."))]
         modes: Vec<BeatmapMode>,

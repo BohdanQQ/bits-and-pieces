@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 async fn most_played_command(
     spec: &Cli,
-    limit: Option<u16>,
+    limit: Option<u64>,
     modes: &Vec<BeatmapMode>,
 ) -> Result<(), Box<dyn Error>> {
     verbose_println(spec, "Collecting most played beatmaps...");
@@ -165,7 +165,7 @@ fn extract_beatmap_set_output(replay: &ReplayCount) -> OutputBeatmapSet {
 
 fn summarize_most_played(
     data: Vec<ReplayCount>,
-    limit: Option<u16>,
+    limit: Option<u64>,
     modes: &Vec<BeatmapMode>,
 ) -> Vec<OutputBeatmapSet> {
     const REPLAY_HASHABLE_DIFFICULTY: fn(&ReplayCount) -> u32 =
@@ -209,7 +209,7 @@ fn summarize_most_played(
     if let Some(l) = limit {
         let mut limited_result = Vec::new();
         for set in result {
-            if limited_result.len() < l.into() {
+            if u64::try_from(limited_result.len()).unwrap() < l {
                 limited_result.push(set);
             } else {
                 break;
@@ -224,9 +224,10 @@ fn summarize_most_played(
 
 async fn get_most_played(
     spec: &Cli,
-    limit: Option<u16>,
+    limit: Option<u64>,
 ) -> Result<Vec<ReplayCount>, Box<dyn Error>> {
     let mut replay_counts = Vec::new();
+    let mut unique_set_ids = HashSet::new();
     let mut offset = 0;
     const PAGE_SIZE: u32 = 100;
 
@@ -247,9 +248,13 @@ async fn get_most_played(
             break;
         }
 
+        for count in &resp {
+            unique_set_ids.insert(count.beatmapset.id);
+        }
+
         replay_counts.append(&mut resp);
 
-        if limit.is_some() && replay_counts.len() >= usize::from(limit.unwrap()) {
+        if limit.is_some() && u64::try_from(unique_set_ids.len()).unwrap() >= limit.unwrap() {
             break;
         }
 
