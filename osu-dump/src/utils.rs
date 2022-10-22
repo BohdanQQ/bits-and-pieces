@@ -1,10 +1,13 @@
-use crate::cli::{BeatmapMode, Cli};
+use crate::cli::{BeatmapMode, Cli, OutputType};
 use serde::Deserialize;
 use std::boxed::Box;
 use std::collections::vec_deque::VecDeque;
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::Display;
+use std::hash::Hash;
 use std::io::ErrorKind;
+use std::process::exit;
 use std::time::{Duration, Instant};
 
 #[path = "./cli.rs"]
@@ -170,5 +173,43 @@ pub fn all_or_modes_to_api_values(modes: &Vec<BeatmapMode>) -> Vec<String> {
         ]
     } else {
         modes.iter().map(mode_to_api_value).collect()
+    }
+}
+
+pub fn print_serializable<T: serde::Serialize>(output_type: OutputType, data: T) {
+    let output_string = match output_type {
+        OutputType::Json => serde_json::to_string_pretty(&data),
+    };
+    match output_string {
+        Ok(json_str) => println!("{}", json_str),
+        Err(e) => {
+            eprintln!("Error when serializing: {}", e);
+            exit(1);
+        }
+    }
+}
+
+pub struct PrebuiltFilter<T: Hash + Eq> {
+    values: HashSet<T>,
+    is_values_allowlist: bool,
+}
+
+impl<T: Hash + Eq> PrebuiltFilter<T> {
+    fn new(values: Vec<T>, allowlist: bool) -> Self {
+        PrebuiltFilter {
+            values: HashSet::from_iter(values.into_iter()),
+            is_values_allowlist: allowlist,
+        }
+    }
+    pub fn allow_values(values: Vec<T>) -> Self {
+        Self::new(values, true)
+    }
+    // for blocklist
+    // pub fn ban_values(values: Vec<T>) -> Self {
+    //     Self::new(values, false)
+    // }
+
+    pub fn allows(&self, value: &T) -> bool {
+        !(self.values.contains(value) ^ self.is_values_allowlist)
     }
 }

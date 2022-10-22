@@ -36,6 +36,31 @@ pub struct OutputBeatmapSet {
     pub beatmap_breakdown: Vec<OutputBeatmap>,
 }
 
+impl OutputBeatmapSet {
+    pub fn from(replay: &ReplayCount) -> Self {
+        OutputBeatmapSet {
+            set_id: replay.beatmapset.id,
+            artist: replay.beatmapset.artist.clone(),
+            creator: replay.beatmapset.creator.clone(),
+            title: replay.beatmapset.title.clone(),
+            play_count: replay.count as u64,
+            beatmap_breakdown: vec![OutputBeatmap::from(replay)],
+        }
+    }
+}
+
+impl OutputBeatmap {
+    pub fn from(replay: &ReplayCount) -> Self {
+        OutputBeatmap {
+            status: replay.beatmap.status.clone(),
+            difficulty_rating: replay.beatmap.difficulty_rating,
+            id: replay.beatmap_id,
+            mode: replay.beatmap.mode.clone(),
+            play_count: replay.count,
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct OutputBeatmap {
     pub id: u32,
