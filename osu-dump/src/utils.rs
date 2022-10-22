@@ -116,17 +116,17 @@ impl OsuAPILimiter {
         if self.limit == 0 || self.starts.len() < usize::from(self.limit) {
             return Duration::new(0, 0);
         }
-        const MICROS_MINUTE: u128 = 60 * 1000 * 1000;
+        let time_frame_micros: u128 = u128::from(self.timeframe_secs) * 1000 * 1000;
         if self
             .starts
             .front()
-            .map_or(true, |x| x.elapsed().as_micros() > MICROS_MINUTE)
+            .map_or(true, |x| x.elapsed().as_micros() >= time_frame_micros)
         {
             return Duration::new(0, 0);
         }
 
         let furthest_instant = self.starts.front().unwrap();
-        let micros_until_request_allowed = MICROS_MINUTE - furthest_instant.elapsed().as_micros();
+        let micros_until_request_allowed = time_frame_micros - furthest_instant.elapsed().as_micros();
         let seconds_until_request_allowed = (micros_until_request_allowed / 1000 / 1000) + 1;
 
         let u64_seconds_until_request_allowed =
