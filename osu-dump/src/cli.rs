@@ -19,7 +19,7 @@ pub struct Cli {
 
     /// API URL to use. It is recommended to setup a local caching proxy to save time and bandwidth.
     #[arg(short, long, default_value("https://osu.ppy.sh"))]
-    pub api_url_base: String
+    pub api_url_base: String,
 }
 
 #[derive(Subcommand, Debug)]
