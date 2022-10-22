@@ -1,11 +1,16 @@
+use crate::cli::BeatmapMode;
 use crate::model::{OutputBeatmap, OutputBeatmapSet, ReplayCount};
 use clap::Parser;
 use std::boxed::Box;
 use std::collections::vec_deque::VecDeque;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use std::fmt::Display;
+use std::fmt::{Display};
+use std::hash::Hash;
+use std::io::ErrorKind;
+use std::process::exit;
 use std::time::{Duration, Instant};
+use serde::Deserialize;
 
 mod cli;
 mod model;
@@ -19,23 +24,28 @@ fn verbose_print<T: Display>(spec: &cli::Cli, message: T) {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn Error>> {
     let args = cli::Cli::parse();
     match args.command {
-        cli::Commands::MostPlayed { limit } => most_played_command(&args, limit).await?,
+        cli::Commands::MostPlayed { limit, ref modes } => {
+            most_played_command(&args, limit, &modes).await?
+        }
     }
     Ok(())
 }
 
-async fn most_played_command(spec: &cli::Cli, limit: Option<u16>) -> Result<(), Box<dyn Error>> {
+async fn most_played_command(
+    spec: &cli::Cli,
+    limit: Option<u16>,
+    modes: &Vec<BeatmapMode>,
+) -> Result<(), Box<dyn Error>> {
     verbose_print(spec, "Collecting most played beatmaps...");
     let most_played = get_most_played(spec, limit).await?;
 
     verbose_print(spec, "Data collected, processing data...");
-    let summarized_data = summarize_most_played(most_played, limit);
+    let summarized_data = summarize_most_played(most_played, limit, modes);
 
     if spec.output.is_some() {
-        // TODO
         print_serializable(spec, summarized_data);
     } else {
         print_summary(spec, summarized_data);
@@ -43,22 +53,45 @@ async fn most_played_command(spec: &cli::Cli, limit: Option<u16>) -> Result<(), 
     Ok(())
 }
 
-fn print_serializable<T: serde::Serialize>(spec: &cli::Cli, _data: Vec<T>) {
-    // TODO
+fn print_serializable<T: serde::Serialize>(spec: &cli::Cli, data: Vec<T>) {
     if let Some(output) = spec.output {
-        match output {
-            cli::OutputType::Json => println!("JSON"),
+        let output_string = match output {
+            cli::OutputType::Json => serde_json::to_string_pretty(&data),
+        };
+        match output_string {
+            Ok(json_str) => println!("{}", json_str),
+            Err(e) => {
+                eprintln!("Error when serializing: {}", e);
+                exit(1);
+            }
         }
     } else {
-        println!("ERROR");
+        eprintln!("Output type not specified");
+        exit(1);
+    }
+}
+
+fn get_mode_string(mode_data: &str) -> String {
+    if mode_data == "osu" {
+        "standard".to_string()
+    } else if mode_data == "taiko" || mode_data == "mania" {
+        mode_data.to_string()
+    }
+    else if mode_data == "fruits" {
+        "catch".to_string()
+    }
+    else {
+        "unknown mode".to_string()
     }
 }
 
 fn print_summary(_spec: &cli::Cli, data: Vec<OutputBeatmapSet>) {
     let mut total_plays = 0;
     let mut star_rating_freqs = Vec::new();
+    let mut total_beatmapsets = 0;
 
     for set_summary in data {
+        total_beatmapsets += 1;
         println!(
             "{} by {} (mapped by {})",
             set_summary.title, set_summary.artist, set_summary.creator
@@ -71,8 +104,8 @@ fn print_summary(_spec: &cli::Cli, data: Vec<OutputBeatmapSet>) {
         println!("\tDifficulty Breakdown:");
         for bm in set_summary.beatmap_breakdown {
             println!(
-                "\t\t {} stars: {} plays",
-                bm.difficulty_rating, bm.play_count
+                "\t\t {} stars, [{}]: {} plays",
+                bm.difficulty_rating, get_mode_string(&bm.mode), bm.play_count
             );
             star_rating_freqs.push((bm.difficulty_rating, bm.play_count))
         }
@@ -80,6 +113,7 @@ fn print_summary(_spec: &cli::Cli, data: Vec<OutputBeatmapSet>) {
     }
 
     println!("\nTotal plays: {}", total_plays);
+    println!("Total beatmap sets: {}", total_beatmapsets);
     let weighed_avg = star_rating_freqs
         .iter()
         .fold(0.0, |acc, (stars, freq)| acc + *stars as f64 * *freq as f64)
@@ -87,25 +121,76 @@ fn print_summary(_spec: &cli::Cli, data: Vec<OutputBeatmapSet>) {
     println!("Average play star rating: {}", weighed_avg);
 }
 
+struct PrebuiltFilter<T: Hash + Eq> {
+    values: HashSet<T>,
+    is_values_allowlist: bool,
+}
+
+impl<T: Hash + Eq> PrebuiltFilter<T> {
+    fn new(values: Vec<T>, allowlist: bool) -> Self {
+        PrebuiltFilter {
+            values: HashSet::from_iter(values.into_iter()),
+            is_values_allowlist: allowlist,
+        }
+    }
+    pub fn allow_values(values: Vec<T>) -> Self {
+        Self::new(values, true)
+    }
+    // for blocklist
+    // pub fn ban_values(values: Vec<T>) -> Self {
+    //     Self::new(values, false)
+    // }
+
+    pub fn allows(&self, value: &T) -> bool {
+        !(self.values.contains(value) ^ self.is_values_allowlist)
+    }
+}
+
+fn modes_to_api_values(modes: &Vec<BeatmapMode>) -> Vec<String> {
+    if modes.is_empty() {
+        vec![
+            "osu".to_string(),
+            "mania".to_string(),
+            "taiko".to_string(),
+            "fruits".to_string(),
+        ]
+    } else {
+        modes
+            .iter()
+            .map(|mode| match mode {
+                BeatmapMode::Standard => "osu".to_string(),
+                BeatmapMode::Mania => "mania".to_string(),
+                BeatmapMode::Taiko => "taiko".to_string(),
+                BeatmapMode::Catch => "fruits".to_string(),
+            })
+            .collect()
+    }
+}
+
 fn summarize_most_played(
-    data: Vec<model::ReplayCount>,
+    data: Vec<ReplayCount>,
     limit: Option<u16>,
+    modes: &Vec<BeatmapMode>,
 ) -> Vec<OutputBeatmapSet> {
+    const REPLAY_HASHABLE_DIFFICULTY: fn(&ReplayCount) -> u32 =
+        |replay: &ReplayCount| (replay.beatmap.difficulty_rating * 10000.0) as u32;
     let mut set_id_map: HashMap<u32, OutputBeatmapSet> = HashMap::new();
+    let mut set_diffs_processed: HashMap<u32, HashSet<u32>> = HashMap::new();
+    let mode_filter = PrebuiltFilter::allow_values(modes_to_api_values(modes));
 
     for replay_info in data {
-        if let Some(info) = set_id_map.get_mut(&replay_info.beatmapset.id) {
-            // TODO efficiency
-            if !info
-                .beatmap_breakdown
-                .iter()
-                .any(|x| x.id == replay_info.beatmap_id)
-            {
-                // TODO parametrize
-                if replay_info.beatmap.mode.to_lowercase() != "osu" {
-                    continue;
-                }
+        if !mode_filter.allows(&replay_info.beatmap.mode) {
+            continue;
+        }
 
+        if let Some(info) = set_id_map.get_mut(&replay_info.beatmapset.id) {
+            // unwrap is safe because set_diffs_processed[id] gets occupied in the else branch along
+            // with set_id_map[id] which has just been checked
+            let difficulty_map = set_diffs_processed
+                .get_mut(&replay_info.beatmapset.id)
+                .unwrap();
+
+            if difficulty_map.insert(REPLAY_HASHABLE_DIFFICULTY(&replay_info)) {
                 info.play_count += replay_info.count as u64;
                 info.beatmap_breakdown
                     .push(extract_beatmap_output(&replay_info));
@@ -114,6 +199,10 @@ fn summarize_most_played(
             set_id_map.insert(
                 replay_info.beatmapset.id,
                 extract_beatmap_set_output(&replay_info),
+            );
+            set_diffs_processed.insert(
+                replay_info.beatmapset.id,
+                HashSet::from([REPLAY_HASHABLE_DIFFICULTY(&replay_info)]),
             );
         }
     }
@@ -137,7 +226,7 @@ fn summarize_most_played(
     result
 }
 
-fn extract_beatmap_output(replay: &model::ReplayCount) -> OutputBeatmap {
+fn extract_beatmap_output(replay: &ReplayCount) -> OutputBeatmap {
     OutputBeatmap {
         status: replay.beatmap.status.clone(),
         difficulty_rating: replay.beatmap.difficulty_rating,
@@ -147,7 +236,7 @@ fn extract_beatmap_output(replay: &model::ReplayCount) -> OutputBeatmap {
     }
 }
 
-fn extract_beatmap_set_output(replay: &model::ReplayCount) -> OutputBeatmapSet {
+fn extract_beatmap_set_output(replay: &ReplayCount) -> OutputBeatmapSet {
     OutputBeatmapSet {
         set_id: replay.beatmapset.id,
         artist: replay.beatmapset.artist.clone(),
@@ -174,27 +263,61 @@ async fn wait_on_limiter(spec: &cli::Cli, limiter: &OsuAPILimiter) {
     tokio::time::sleep(wait_time).await;
 }
 
+async fn exponential_wait_request_attempt<D: for<'a> Deserialize<'a>>(spec: &cli::Cli, url: &str, max_retries: u32) -> Result<D, Box<dyn Error>>
+{
+    let mut retry_count = 0;
+    let mut last_error: Box<dyn Error> = Box::new(std::io::Error::new(ErrorKind::Unsupported, "This error should never happen!"));
+    let mut limiter = OsuAPILimiter::new(MAX_REQUESTS_PER_MINUTE);
+
+    while retry_count <= max_retries {
+        wait_on_limiter(spec, &limiter).await;
+        let raw_response = reqwest::get(url).await;
+        limiter.register_request_performed();
+        let json_result = match raw_response {
+            Ok(r) => r.json::<D>().await,
+            Err(e) => {
+                verbose_print(spec, format!("Error when performing a request!\nError: {}\nRetry counter: {}\\{}", e.to_string(), retry_count, max_retries));
+                last_error = Box::new(e);
+                tokio::time::sleep(Duration::new(i32::from(2).pow(retry_count) as u64, 0)).await;
+                retry_count += 1;
+                continue;
+            }
+        };
+
+        match json_result {
+            Ok(json) => return Ok(json),
+            Err(e) => {
+                verbose_print(spec, format!("Error when performing a request!\nError: {}\nRetry counter: {}\\{}", e.to_string(), retry_count, max_retries));
+                last_error = Box::new(e);
+                tokio::time::sleep(Duration::new(i32::from(2).pow(retry_count)  as u64, 0)).await;
+                retry_count += 1;
+                continue;
+            }
+        };
+    };
+    return Err(last_error);
+}
+
 async fn get_most_played(
     spec: &cli::Cli,
     limit: Option<u16>,
-) -> Result<Vec<model::ReplayCount>, Box<dyn Error>> {
+) -> Result<Vec<ReplayCount>, Box<dyn Error>> {
     let mut replay_counts = Vec::new();
     let mut offset = 0;
     const PAGE_SIZE: u32 = 100;
-    let mut limiter = OsuAPILimiter::new(MAX_REQUESTS_PER_MINUTE);
 
     loop {
-        wait_on_limiter(spec, &limiter).await;
+
         let url = format!(
-            "https://osu.ppy.sh/users/{}/beatmapsets/most_played?limit={}&offset={}",
-            spec.user_id.as_str(),
+            "{}/users/{}/beatmapsets/most_played?limit={}&offset={}",
+            spec.api_url_base,
+            spec.user_id,
             PAGE_SIZE,
             offset
         );
         verbose_print(spec, format!("URL: {}", url));
-        limiter.register_request_performed();
 
-        let mut resp = reqwest::get(url).await?.json::<Vec<ReplayCount>>().await?;
+        let mut resp: Vec<ReplayCount> = exponential_wait_request_attempt(spec, &url, 3).await?;
 
         if resp.is_empty() {
             break;
