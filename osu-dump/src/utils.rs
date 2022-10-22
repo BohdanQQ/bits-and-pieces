@@ -126,7 +126,8 @@ impl OsuAPILimiter {
         }
 
         let furthest_instant = self.starts.front().unwrap();
-        let micros_until_request_allowed = time_frame_micros - furthest_instant.elapsed().as_micros();
+        let micros_until_request_allowed =
+            time_frame_micros - furthest_instant.elapsed().as_micros();
         let seconds_until_request_allowed = (micros_until_request_allowed / 1000 / 1000) + 1;
 
         let u64_seconds_until_request_allowed =
