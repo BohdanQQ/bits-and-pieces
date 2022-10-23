@@ -13,27 +13,29 @@ collect and summarize user plays data.
 ## Usage
 
     An Osu! profile data extraction tool.
-    
-    Usage: osu-dump [OPTIONS] <USER_ID> <COMMAND>
-    
+
+    Usage: osu-dump.exe [OPTIONS] <USER_ID> <COMMAND>
+
     Commands:
     most-played  Lists Most Played Beatmaps. Data collection may take very long time depending on the amount of beatmaps played
     help         Print this message or the help of the given subcommand(s)
-    
+
     Arguments:
     <USER_ID>  User ID
-    
+
     Options:
     -v, --verbose
-    Request verbose output
+            Request verbose output
     -o, --output <OUTPUT>
-    Output type [possible values: json]
-    -a, --api-url-base <API_URL_BASE>
-    API URL to use. It is recommended to setup a local caching proxy to save time and bandwidth [default: https://osu.ppy.sh]
+            Output type [possible values: json]
+    -u, --api-url-base <API_URL_BASE>
+            API URL to use. It is recommended to setup a local caching proxy to save time and bandwidth [default: https://osu.ppy.sh]
+    -r, --request-limit <REQUEST_LIMIT>
+            API request limit in the format "N:M" where N is the maximum number of calls in M seconds. Use 0 to represent "no limits" [default: 50:60]
     -h, --help
-    Print help information
+            Print help information
     -V, --version
-    Print version information
+            Print version information
 
 ### `most-played` command
 
