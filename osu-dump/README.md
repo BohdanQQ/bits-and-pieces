@@ -14,7 +14,7 @@ collect and summarize user plays data.
 
     An Osu! profile data extraction tool.
     
-    Usage: osu-dump.exe [OPTIONS] <USER_ID> <COMMAND>
+    Usage: osu-dump [OPTIONS] <USER_ID> <COMMAND>
     
     Commands:
     most-played  Lists Most Played Beatmaps. Data collection may take very long time depending on the amount of beatmaps played
@@ -34,6 +34,19 @@ collect and summarize user plays data.
     Print help information
     -V, --version
     Print version information
+
+### `most-played` command
+
+    Lists Most Played Beatmaps. Data collection may take very long time depending on the amount of beatmaps played
+    
+    Usage: osu-dump <USER_ID> most-played [OPTIONS] [MODES]...
+    
+    Arguments:
+    [MODES]...  Osu beatmap modes to filter. Accepts all by default. [possible values: standard, mania, taiko, catch]
+    
+    Options:
+    -l, --limit <LIMIT>  Limits the amount of beatmaps outputted. LIMITS ACCURACY because not all data will be fetched from the Osu! API
+    -h, --help           Print help information
 
 ## TODO
 * proper terminal output format

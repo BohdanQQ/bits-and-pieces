@@ -1,15 +1,15 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct ReplayCount {
+pub struct BeatmapPlaycount {
     pub beatmap_id: u32,
     pub count: u32,
-    pub beatmap: Beatmap,
-    pub beatmapset: BeatmapSet,
+    pub beatmap: BeatmapCompact,
+    pub beatmapset: BeatmapsetCompact,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Beatmap {
+pub struct BeatmapCompact {
     pub difficulty_rating: f32,
     pub id: u32,
     pub mode: String,
@@ -17,7 +17,7 @@ pub struct Beatmap {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct BeatmapSet {
+pub struct BeatmapsetCompact {
     pub id: u32,
     pub artist: String,
     pub artist_unicode: String,
@@ -37,7 +37,7 @@ pub struct OutputBeatmapSet {
 }
 
 impl OutputBeatmapSet {
-    pub fn from(replay: &ReplayCount) -> Self {
+    pub fn from(replay: &BeatmapPlaycount) -> Self {
         OutputBeatmapSet {
             set_id: replay.beatmapset.id,
             artist: replay.beatmapset.artist.clone(),
@@ -50,7 +50,7 @@ impl OutputBeatmapSet {
 }
 
 impl OutputBeatmap {
-    pub fn from(replay: &ReplayCount) -> Self {
+    pub fn from(replay: &BeatmapPlaycount) -> Self {
         OutputBeatmap {
             status: replay.beatmap.status.clone(),
             difficulty_rating: replay.beatmap.difficulty_rating,

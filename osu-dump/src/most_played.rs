@@ -1,5 +1,5 @@
 use crate::cli::{BeatmapMode, Cli};
-use crate::model::{OutputBeatmap, OutputBeatmapSet, ReplayCount};
+use crate::model::{OutputBeatmap, OutputBeatmapSet, BeatmapPlaycount};
 use crate::utils::verbose_println;
 use std::boxed::Box;
 use std::collections::{HashMap, HashSet};
@@ -85,7 +85,7 @@ fn print_summary(data: Vec<OutputBeatmapSet>) {
 }
 
 fn summarize_most_played(
-    data: Vec<ReplayCount>,
+    data: Vec<BeatmapPlaycount>,
     limit: Option<u64>,
     modes: &Vec<BeatmapMode>,
 ) -> Vec<OutputBeatmapSet> {
@@ -98,12 +98,12 @@ fn summarize_most_played(
     try_limit_output(result, limit)
 }
 
-fn aggregate_difficulties_with_filter<F>(data: Vec<ReplayCount>, filter: F) -> Vec<OutputBeatmapSet>
+fn aggregate_difficulties_with_filter<F>(data: Vec<BeatmapPlaycount>, filter: F) -> Vec<OutputBeatmapSet>
 where
-    F: Fn(&ReplayCount) -> bool,
+    F: Fn(&BeatmapPlaycount) -> bool,
 {
-    const REPLAY_HASHABLE_DIFFICULTY: fn(&ReplayCount) -> u32 =
-        |replay: &ReplayCount| (replay.beatmap.difficulty_rating * 10000.0) as u32;
+    const REPLAY_HASHABLE_DIFFICULTY: fn(&BeatmapPlaycount) -> u32 =
+        |replay: &BeatmapPlaycount| (replay.beatmap.difficulty_rating * 10000.0) as u32;
     let mut set_id_map: HashMap<u32, OutputBeatmapSet> = HashMap::new();
     let mut set_diffs_processed: HashMap<u32, HashSet<u32>> = HashMap::new();
 
@@ -158,7 +158,7 @@ fn try_limit_output(target: Vec<OutputBeatmapSet>, limit: Option<u64>) -> Vec<Ou
 async fn get_most_played_raw(
     spec: &Cli,
     limit: Option<u64>,
-) -> Result<Vec<ReplayCount>, Box<dyn Error>> {
+) -> Result<Vec<BeatmapPlaycount>, Box<dyn Error>> {
     let mut replay_counts = Vec::new();
     let mut unique_set_ids = HashSet::new();
     let mut offset = 0;
@@ -174,7 +174,7 @@ async fn get_most_played_raw(
             spec.api_url_base, spec.user_id, PAGE_SIZE, offset
         );
 
-        let mut resp: Vec<ReplayCount> =
+        let mut resp: Vec<BeatmapPlaycount> =
             utils::exponential_wait_request_attempt(spec, &url, 3, &mut limiter).await?;
 
         if resp.is_empty() {
