@@ -61,9 +61,9 @@ fn print_summary(data: Vec<OutputBeatmapSet>) {
         println!("\tDifficulty Breakdown:");
         for beatmap in set_summary.beatmap_breakdown {
             println!(
-                "\t\t {:.2} stars, [{}]: {:5} plays",
-                beatmap.difficulty_rating,
+                "\t\t {:8}, {:.2}*: {:5} plays",
                 get_mode_string(&beatmap.mode),
+                beatmap.difficulty_rating,
                 beatmap.play_count
             );
             star_rating_freqs.push((beatmap.difficulty_rating, beatmap.play_count))
