@@ -1,16 +1,12 @@
 use crate::cli::{BeatmapMode, Cli};
-use crate::model::{OutputBeatmap, OutputBeatmapSet, BeatmapPlaycount};
-use crate::utils::verbose_println;
+use crate::model::{BeatmapPlaycount, OutputBeatmap, OutputBeatmapSet};
+use crate::utils::{
+    all_or_modes_to_api_values, exponential_wait_request_attempt, print_serializable,
+    verbose_println, OsuAPILimiter, PrebuiltFilter,
+};
 use std::boxed::Box;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
-
-#[path = "./cli.rs"]
-mod cli;
-#[path = "./model.rs"]
-mod model;
-#[path = "./utils.rs"]
-mod utils;
 
 pub async fn most_played_command(
     spec: &Cli,
@@ -24,7 +20,7 @@ pub async fn most_played_command(
     let summarized_data = summarize_most_played(most_played, limit, modes);
 
     if let Some(out_type) = spec.output {
-        utils::print_serializable(out_type, summarized_data);
+        print_serializable(out_type, summarized_data);
     } else {
         print_summary(summarized_data);
     }
@@ -89,7 +85,7 @@ fn summarize_most_played(
     limit: Option<u64>,
     modes: &Vec<BeatmapMode>,
 ) -> Vec<OutputBeatmapSet> {
-    let mode_filter = utils::PrebuiltFilter::allow_values(utils::all_or_modes_to_api_values(modes));
+    let mode_filter = PrebuiltFilter::allow_values(all_or_modes_to_api_values(modes));
 
     let mut result =
         aggregate_difficulties_with_filter(data, move |x| mode_filter.allows(&x.beatmap.mode));
@@ -98,7 +94,10 @@ fn summarize_most_played(
     try_limit_output(result, limit)
 }
 
-fn aggregate_difficulties_with_filter<F>(data: Vec<BeatmapPlaycount>, filter: F) -> Vec<OutputBeatmapSet>
+fn aggregate_difficulties_with_filter<F>(
+    data: Vec<BeatmapPlaycount>,
+    filter: F,
+) -> Vec<OutputBeatmapSet>
 where
     F: Fn(&BeatmapPlaycount) -> bool,
 {
@@ -164,7 +163,7 @@ async fn get_most_played_raw(
     let mut offset = 0;
     const PAGE_SIZE: u32 = 100;
 
-    let mut limiter = utils::OsuAPILimiter::new(
+    let mut limiter = OsuAPILimiter::new(
         spec.request_limit.requests,
         spec.request_limit.timeframe_secs,
     );
@@ -175,7 +174,7 @@ async fn get_most_played_raw(
         );
 
         let mut resp: Vec<BeatmapPlaycount> =
-            utils::exponential_wait_request_attempt(spec, &url, 3, &mut limiter).await?;
+            exponential_wait_request_attempt(spec, &url, 3, &mut limiter).await?;
 
         if resp.is_empty() {
             break;

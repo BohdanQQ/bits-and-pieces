@@ -10,11 +10,6 @@ use std::io::ErrorKind;
 use std::process::exit;
 use std::time::{Duration, Instant};
 
-#[path = "./cli.rs"]
-mod cli;
-#[path = "./model.rs"]
-mod model;
-
 pub fn verbose_print<T: Display>(spec: &Cli, message: T) {
     if spec.verbose {
         print!("{}", message);
