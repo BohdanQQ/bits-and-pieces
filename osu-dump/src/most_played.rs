@@ -50,7 +50,7 @@ fn print_summary(data: Vec<OutputBeatmapSet>) {
     for set_summary in data {
         total_beatmapsets += 1;
         println!(
-            "{} by {} (mapped by {})",
+            "{}\nby {}\nmapped by {}",
             set_summary.title, set_summary.artist, set_summary.creator
         );
         println!("\tPlays:   {}", set_summary.play_count);
@@ -61,7 +61,7 @@ fn print_summary(data: Vec<OutputBeatmapSet>) {
         println!("\tDifficulty Breakdown:");
         for beatmap in set_summary.beatmap_breakdown {
             println!(
-                "\t\t {} stars, [{}]: {} plays",
+                "\t\t {:.2} stars, [{}]: {:5} plays",
                 beatmap.difficulty_rating,
                 get_mode_string(&beatmap.mode),
                 beatmap.play_count
