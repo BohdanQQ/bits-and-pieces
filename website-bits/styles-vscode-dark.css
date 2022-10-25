@@ -1,0 +1,37 @@
+/*
+ * Credit:
+ *      * https://gist.github.com/JoeyBurzynski/617fb6201335779f8424ad9528b72c41
+ *      * Visual Studio Dark Theme
+ */
+ html {
+    max-width: 70ch;
+    padding: 3em 1em;
+    margin: auto;
+    line-height: 1.75;
+    font-size: 1.25em;
+    background-color: #1e1e1e;
+}
+
+h1,h2,h3,h4,h5,h6 {
+    margin: 3em 0 1em;
+    color: #438BD4;
+    font-family: monospace;
+}
+
+p,ul,ol {
+    margin-bottom: 2em;
+    color: white;
+    font-family: sans-serif;
+}
+
+b {
+    color: #D870B2;
+}
+
+a {
+    color: #44C9B0;
+}
+
+a:hover {
+    color: #A0DCFD;
+}
