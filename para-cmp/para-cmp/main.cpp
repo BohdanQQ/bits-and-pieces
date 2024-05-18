@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <chrono>
 #include <atomic>
+#include <filesystem>
 
 //#define MEASUREMENTS
 //#define DEBUG
@@ -35,7 +36,7 @@ using ComparisonResult = std::optional<std::size_t>;
 template <typename T>
 void log(const T& var) {
 	static std::mutex logMutex;
-	std::lock_guard<std::mutex> lock(logMutex);
+	std::lock_guard lock(logMutex);
 	std::cerr << std::this_thread::get_id() << ' ' << var << '\n';
 }
 
@@ -45,7 +46,7 @@ struct ComparisonParams {
 	std::size_t startOffset;
 };
 
-std::atomic<std::size_t> totalRead;
+const std::atomic<std::size_t> totalRead;
 
 // initialize -> (read -> compare) loop
 class FileChunk {
@@ -61,7 +62,7 @@ class FileChunk {
 	bool ok{ true };
 
 public:
-	FileChunk(const std::string& file1, const std::string& file2, const ComparisonParams& params)
+	FileChunk(const std::filesystem::path& file1, const std::filesystem::path& file2, const ComparisonParams& params)
 		: fileStream1(file1, std::ios::binary), fileStream2(file2, std::ios::binary),
 		params(params) {
 		if (!fileStream1.is_open() || !fileStream2.is_open()) {
@@ -142,7 +143,7 @@ public:
 };
 
 // nullopt if no difference
-ComparisonResult compareFiles(const std::string& file1, const std::string& file2, const ComparisonParams& params) {
+ComparisonResult compareFiles(const std::filesystem::path& file1, const std::filesystem::path& file2, const ComparisonParams& params) {
 	using namespace std;
 
 	FileChunk fileChunk(file1, file2, params);
@@ -187,6 +188,7 @@ std::optional<std::size_t> parseNumArg(const char* str) {
 }
 
 void printTimeStats(std::chrono::high_resolution_clock::time_point start) {
+
 #ifdef MEASUREMENTS
 	using namespace std;
 	auto end = chrono::high_resolution_clock::now();
@@ -197,8 +199,8 @@ void printTimeStats(std::chrono::high_resolution_clock::time_point start) {
 }
 
 int main(int argc, char** argv) {
-	std::string file1;
-	std::string file2;
+	std::filesystem::path file1;
+	std::filesystem::path file2;
 
 	if (argc < 3) {
 		std::cerr << "Usage: " << argv[0] << " <file1> <file2> [taskCount] [bytesAvailable]\n";
@@ -221,7 +223,7 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
-	std::size_t taskCount = std::thread::hardware_concurrency() * 4;
+	std::size_t taskCount = std::thread::hardware_concurrency() * 4ULL;
 	if (argc > 3) {
 		auto res = parseNumArg(argv[3]).value_or(taskCount);
 		if (!res) {
@@ -231,7 +233,7 @@ int main(int argc, char** argv) {
 		taskCount = res;
 	}
 
-	std::size_t availableBytes = 1 * 1024 * 1024;
+	std::size_t availableBytes = 1ULL * 1024 * 1024;
 	if (argc > 4) {
 		auto res = parseNumArg(argv[4]).value_or(availableBytes);
 		if (!res) {
@@ -244,9 +246,8 @@ int main(int argc, char** argv) {
 	std::vector<std::future<ComparisonResult>> tasks;
 
 	std::size_t fileSize1 = std::filesystem::file_size(file1);
-	std::size_t fileSize2 = std::filesystem::file_size(file2);
 
-	if (fileSize1 != fileSize2) {
+	if (std::size_t fileSize2 = std::filesystem::file_size(file2);  fileSize1 != fileSize2) {
 		log("ERROR: Files are of different length");
 		return 1;
 	}
@@ -285,7 +286,7 @@ int main(int argc, char** argv) {
 		);
 	}
 
-	for (auto& task : tasks) {
+	for (const auto& task : tasks) {
 		task.wait();
 	}
 
@@ -293,7 +294,7 @@ int main(int argc, char** argv) {
 	for (auto& task : tasks) {
 		auto result = task.get();
 		if (result) {
-			log("Files differ at offset " + std::to_string(result.value()));
+			log(std::format("Files differ at offset {}", std::to_string(result.value())));
 			ret = 1;
 			break;
 		}
