@@ -13,14 +13,22 @@
 #include <vector>
 
 // #define MEASUREMENTS
-// #define DEBUG
+//  #define DEBUG
 
 #ifdef _WIN32
 #ifdef MEASUREMENTS
 #include <Windows.h>
+#include <comdef.h>
 
-void disable_file_caching(const char* fn) {
-    HANDLE hd = CreateFileA(fn, GENERIC_READ, 0, NULL, OPEN_EXISTING,
+// this sometimes does not work...???
+void disable_file_caching(const wchar_t* fn) {
+    // Constructs a _bstr_t object by calling SysAllocString to create a new
+    // BSTR object and then encapsulates it.
+    _bstr_t b(fn);
+    // Convert to char*
+    const char* c = b;
+
+    HANDLE hd = CreateFileA(c, GENERIC_READ, 0, NULL, OPEN_EXISTING,
                             FILE_FLAG_NO_BUFFERING, NULL);
     CloseHandle(hd);
 }
@@ -29,6 +37,34 @@ void disable_file_caching(const char* fn) {
 #undef min
 #endif
 #endif
+
+#ifdef MEASUREMENTS
+struct PaddedCount {
+    __declspec(align(64)) std::streamsize value;
+};
+
+std::vector<PaddedCount> readCounts;
+#endif
+
+inline void registerRead([[maybe_unused]] std::size_t threadIdx,
+                         [[maybe_unused]] std::streamsize size) {
+#ifdef MEASUREMENTS
+    // readCounts could be made function-local-static but I cannot be bothered
+    // to look up the thread safety of such initialization
+    readCounts[threadIdx].value += size;
+#endif
+}
+
+inline std::streamsize getTotalRead() {
+    std::streamsize totalRead = 0;
+#ifdef MEASUREMENTS
+    for (auto const& threadReadCount : readCounts) {
+        totalRead += threadReadCount.value *
+                     2;   // reading from both files on each thread
+    }
+#endif
+    return totalRead;
+}
 
 using ComparisonResult = std::optional<std::size_t>;
 
@@ -39,13 +75,27 @@ void log(const T& var) {
     std::cerr << std::this_thread::get_id() << ' ' << var << '\n';
 }
 
+void printTimeStats(
+    [[maybe_unused]] std::chrono::high_resolution_clock::time_point start) {
+#ifdef MEASUREMENTS
+    using namespace std;
+    auto end = chrono::high_resolution_clock::now();
+    auto duration =
+        chrono::duration_cast<chrono::milliseconds>(end - start).count();
+    log(std::format("Time: {} ms", duration));
+
+    auto totalRead = getTotalRead();
+    log(std::format("Total read: {} bytes, {} MB", totalRead,
+                    totalRead / 1024 / 1024));
+#endif
+}
+
 struct ComparisonParams {
     std::size_t wholeChunkSize;
     std::size_t bufferSize;
     std::size_t startOffset;
+    std::size_t threadId;
 };
-
-const std::atomic<std::size_t> totalRead;
 
 // initialize -> (read -> compare) loop
 class FileChunk {
@@ -118,9 +168,7 @@ class FileChunk {
         }
         lastReadOffset = currentReadOffset;
         currentReadOffset += fileStream1.gcount();
-#ifdef MEASUREMENTS
-        totalRead += fileStream1.gcount();
-#endif
+        registerRead(params.threadId, fileStream1.gcount());
         return fileStream1.gcount();
     }
 
@@ -187,18 +235,6 @@ std::optional<std::size_t> parseNumArg(const char* str) {
     return std::stoul(str);
 }
 
-void printTimeStats(std::chrono::high_resolution_clock::time_point start) {
-#ifdef MEASUREMENTS
-    using namespace std;
-    auto end = chrono::high_resolution_clock::now();
-    auto duration =
-        chrono::duration_cast<chrono::milliseconds>(end - start).count();
-    log("Time: " + to_string(duration) + "ms");
-    log("Total read: " + to_string(totalRead) + " bytes, " +
-        to_string(totalRead / 1024 / 1024) + " MB");
-#endif
-}
-
 int main(int argc, char** argv) {
     std::filesystem::path file1;
     std::filesystem::path file2;
@@ -224,7 +260,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::size_t taskCount = std::thread::hardware_concurrency() * 4ULL;
+    std::size_t taskCount = 2ULL;
     if (argc > 3) {
         auto res = parseNumArg(argv[3]).value_or(taskCount);
         if (! res) {
@@ -234,7 +270,7 @@ int main(int argc, char** argv) {
         taskCount = res;
     }
 
-    std::size_t availableBytes = 1ULL * 1024 * 1024;
+    std::size_t availableBytes = taskCount * 4096;
     if (argc > 4) {
         auto res = parseNumArg(argv[4]).value_or(availableBytes);
         if (! res) {
@@ -266,8 +302,9 @@ int main(int argc, char** argv) {
     disable_file_caching(file1.c_str());
     disable_file_caching(file2.c_str());
 
-    log("Task count: " + std::to_string(taskCount));
-    log("Memory per task: " + std::to_string(memoryPerTask));
+    log(std::format("Task count: {}", taskCount));
+    log(std::format("Memory per task: {}", memoryPerTask));
+    readCounts.resize(taskCount);
 #endif   // MEASUREMENTS
 
     std::size_t chunkSize = (fileSize1 + taskCount - 1) / taskCount;
@@ -280,9 +317,10 @@ int main(int argc, char** argv) {
         std::size_t realChunkSize =
             std::min(chunkSize, fileSize1 - startOffset);
 
-        tasks.push_back(std::async(
-            std::launch::async, compareFiles, file1, file2,
-            ComparisonParams {realChunkSize, memoryPerTask / 2, startOffset}));
+        tasks.push_back(
+            std::async(std::launch::async, compareFiles, file1, file2,
+                       ComparisonParams {realChunkSize, memoryPerTask / 2,
+                                         startOffset, i}));
     }
 
     for (const auto& task : tasks) {
