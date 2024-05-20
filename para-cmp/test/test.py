@@ -93,7 +93,11 @@ def index_test_one_byte(size, start, end, binary_path, thread_count, memory):
 
     if not eval_different(i, open(output_file, "r").readlines()):
       return False
-
+    
+    try:
+      os.remove(output_file)
+    except:
+      pass
   return True
      
 def test_detect_start(binary_path, thread_count, memory):
@@ -121,5 +125,11 @@ if __name__ == "__main__":
     ]:
      if not t(binary_path, thread_count, memory):
         exit(1)
+    
+  try:
+    os.remove(FILE1)
+    os.remove(FILE2)
+  except:
+    pass
   
   exit(0)
