@@ -7,7 +7,6 @@ FILENAME_2 = "fuzz_file_2"
 OUT_FILE_NAME = "fuzz_output"
 MAX_DIFF_SIZE = 512
 EMPTY_RANGE = (-1, -1)
-THREAD_COUNT = 8
 
 def check_file_exists(file_path):
   if not os.path.exists(file_path):
@@ -63,12 +62,12 @@ def clear_files():
     except:
       pass
 
-def fuzz(num_passes, file_path, mem):
+def fuzz(num_passes, file_path, mem, thread_count):
   for i in range(num_passes):
     clear_files()
     diff_range = generate_random_data(file_size)
     
-    code = os.system(f"{file_path} {FILENAME_1} {FILENAME_2} {THREAD_COUNT} {mem} 2> {OUT_FILE_NAME}")
+    code = os.system(f"{file_path} {FILENAME_1} {FILENAME_2} {thread_count} {mem} 2> {OUT_FILE_NAME}")
     
     if code != 0 and diff_range == EMPTY_RANGE:
       print(f"Error: Test failed on pass {i} (expected same files)")
@@ -86,23 +85,27 @@ def fuzz(num_passes, file_path, mem):
 
 if __name__ == "__main__":
   if len(sys.argv) < 4:
-    print("Usage: python fuzz.py <file_path> <seed> <file_size> <num_passes> <memory per thread>")
+    print("Usage: python fuzz.py <file_path> <seed> <file_size> <num_passes> <thread_count> <memory per thread> ")
     sys.exit(1)
 
   file_path = sys.argv[1]
   seed = int(sys.argv[2])
   file_size = int(sys.argv[3])
   num_passes = int(sys.argv[4])
+  thread_count = int(sys.argv[5])
   memory = 4096 * 4096
   try:
-    memory = int(sys.argv[5]) * THREAD_COUNT
+    memory = int(sys.argv[6]) * thread_count
+    if memory % (thread_count * 2) != 0:
+      print("total memory must be divisible by threadcoutn * 2")
+      exit(1)
   except:
     pass
 
   random.seed(seed)
 
   check_file_exists(file_path)
-  if fuzz(num_passes, file_path, memory):
+  if fuzz(num_passes, file_path, memory, thread_count):
     clear_files()
     exit(0)
 
