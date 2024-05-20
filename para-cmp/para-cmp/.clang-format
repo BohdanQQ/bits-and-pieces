@@ -1,0 +1,54 @@
+﻿---
+# We'll use defaults from the LLVM style, but with 4 columns indentation.
+BasedOnStyle: Google
+---
+Language: Cpp
+
+IndentWidth: 4
+AllowShortIfStatementsOnASingleLine: false
+IndentCaseLabels: false
+AlignArrayOfStructures: Left
+
+# overrides the base style
+DerivePointerAlignment: false
+PointerAlignment: Left
+
+SpaceAroundPointerQualifiers: Before
+ReferenceAlignment: Left
+EmptyLineBeforeAccessModifier: LogicalBlock
+AlignConsecutiveAssignments: true
+
+FixNamespaceComments: true
+MaxEmptyLinesToKeep: 1
+
+SeparateDefinitionBlocks: Always
+SortIncludes: CaseSensitive
+SpaceAfterCStyleCast: true
+SpaceAfterLogicalNot: true
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeCaseColon: false
+SpaceBeforeCpp11BracedList: true
+SpaceBeforeCtorInitializerColon: false
+SpaceBeforeInheritanceColon: true
+SpaceBeforeParens: ControlStatements
+SpaceBeforeRangeBasedForLoopColon: true
+SpaceBeforeSquareBrackets: false
+SpaceInEmptyBlock: true
+SpacesBeforeTrailingComments: 3
+SpacesInAngles: Leave
+SpacesInLineCommentPrefix:
+  Minimum: 1
+  Maximum: -1
+SpacesInSquareBrackets: false
+Standard: Latest
+
+# clang-format v15
+# RequiresClausePositionStyle: OwnLine
+
+# clang-format v17
+# SpacesInParens: Custom
+# SpacesInParensOptions:
+#   InConditionalStatements: false
+#   InEmptyParentheses: false
+#   Other: false
+---
