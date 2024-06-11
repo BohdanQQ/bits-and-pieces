@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <future>
 #include <iostream>
@@ -75,8 +76,8 @@ void log(const T& var) {
     std::cerr << std::this_thread::get_id() << ' ' << var << '\n';
 }
 
-void printTimeStats(
-    [[maybe_unused]] std::chrono::high_resolution_clock::time_point start) {
+template <typename T>
+void printTimeStats([[maybe_unused]] const T& start) {
 #ifdef MEASUREMENTS
     using namespace std;
     auto end = chrono::high_resolution_clock::now();
@@ -309,8 +310,7 @@ int main(int argc, char** argv) {
 
     std::size_t chunkSize = (fileSize1 + taskCount - 1) / taskCount;
 
-    std::chrono::high_resolution_clock::time_point start =
-        std::chrono::steady_clock::now();
+    auto start = std::chrono::steady_clock::now();
 
     for (std::size_t i = 0; i < taskCount; ++i) {
         std::size_t startOffset = i * chunkSize;
