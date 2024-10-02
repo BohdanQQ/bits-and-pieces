@@ -14,7 +14,7 @@
 #include <vector>
 
 // #define MEASUREMENTS
-//  #define DEBUG
+// #define DEBUG
 
 #ifdef _WIN32
 #ifdef MEASUREMENTS
@@ -22,7 +22,7 @@
 #include <comdef.h>
 
 // this sometimes does not work...???
-void disable_file_caching(const wchar_t* fn) {
+static void disable_file_caching(const wchar_t* fn) {
     // Constructs a _bstr_t object by calling SysAllocString to create a new
     // BSTR object and then encapsulates it.
     _bstr_t b(fn);
@@ -47,8 +47,8 @@ struct PaddedCount {
 std::vector<PaddedCount> readCounts;
 #endif
 
-inline void registerRead([[maybe_unused]] std::size_t threadIdx,
-                         [[maybe_unused]] std::streamsize size) {
+static inline void registerRead([[maybe_unused]] std::size_t threadIdx,
+                                [[maybe_unused]] std::streamsize size) {
 #ifdef MEASUREMENTS
     // readCounts could be made function-local-static but I cannot be bothered
     // to look up the thread safety of such initialization
@@ -56,7 +56,7 @@ inline void registerRead([[maybe_unused]] std::size_t threadIdx,
 #endif
 }
 
-inline std::streamsize getTotalRead() {
+static inline std::streamsize getTotalRead() {
     std::streamsize totalRead = 0;
 #ifdef MEASUREMENTS
     for (auto const& threadReadCount : readCounts) {
@@ -67,7 +67,18 @@ inline std::streamsize getTotalRead() {
     return totalRead;
 }
 
-using ComparisonResult = std::optional<std::size_t>;
+enum class Result { OkDiff, OkSame, Error };
+
+using ComparisonResult = std::tuple<Result, std::size_t>;
+
+constexpr int E_OK        = 0;
+constexpr int E_DIFFERENT = 1;
+constexpr int E_USAGE     = 2;
+constexpr int E_OTHER     = 3;
+// no idea why but for larger task count, file opening fails...
+// realistically the number will remain small for the forseeable future
+constexpr int MAX_TASK = 32;
+constexpr int MIN_TASK = 2;
 
 template <typename T>
 void log(const T& var) {
@@ -118,8 +129,12 @@ class FileChunk {
         : fileStream1(file1, std::ios::binary),
           fileStream2(file2, std::ios::binary),
           params(params) {
-        if (! fileStream1.is_open() || ! fileStream2.is_open()) {
-            ok = false;
+        ok &= fileStream1.is_open() && fileStream2.is_open();
+        if (! ok) {
+#ifdef DEBUG
+            log("chunk error: failed to open");
+#endif
+            return;
         }
 
         fileStream1.seekg(params.startOffset);
@@ -128,12 +143,17 @@ class FileChunk {
         buffer1.resize(params.bufferSize);
         buffer2.resize(params.bufferSize);
 
-        if (! fileStream1 || ! fileStream2) {
-            ok = false;
-        }
+        ok &= fileStream1 && fileStream2;
 #ifdef DEBUG
-        log("start at " + std::to_string(params.startOffset));
-        log("chunk size " + std::to_string(params.wholeChunkSize));
+        if (! ok) {
+            log(
+                std::format("chunk error: ctor cannot seekg on stream/other "
+                            "stream error {}",
+                            (fileStream1 ? 1 : 2)));
+        }
+        log(std::format("start at {}", params.startOffset));
+        log(std::format("chunk size {}", params.wholeChunkSize));
+        log(std::format("buff size {}", params.bufferSize));
 #endif
     }
 
@@ -160,24 +180,30 @@ class FileChunk {
 
         fileStream1.read(buffer1.data(), size);
         fileStream2.read(buffer2.data(), size);
-
-        if (fileStream1.gcount() != fileStream2.gcount()) {
-            log("ERROR: Files are of different length");
+        auto fs1Count = fileStream1.gcount();
+        if (auto fs2Count = fileStream2.gcount(); fs1Count != fs2Count) {
+            log(std::format(
+                "ERROR: Files are of different length (1: {} vs 2: {})",
+                fs1Count, fs2Count));
             return std::nullopt;
-        } else if (fileStream1.gcount() != size) {
-            log("WARN: File read read different size than requested");
+        } else if (fs1Count != size) {
+            log(std::format(
+                "WARN: File read count ({}) different size than requested ({})",
+                fs1Count, size));
         }
         lastReadOffset = currentReadOffset;
-        currentReadOffset += fileStream1.gcount();
-        registerRead(params.threadId, fileStream1.gcount());
-        return fileStream1.gcount();
+        currentReadOffset += fs1Count;
+        registerRead(params.threadId, fs1Count);
+        return fs1Count;
     }
 
     // compares internal buffers, returns offset of first difference or nullopt
     // if no difference found
     std::optional<std::streamsize> compare(std::size_t size) {
         if (memcmp(buffer1.data(), buffer2.data(), size) != 0) {
-            for (size_t i = 0; i < fileStream1.gcount(); ++i) {
+            // watch out, the gcount call here implies no other reads on the filestream1 can take place
+            // before calling this funciton
+            for (std::streamsize i = 0; i < fileStream1.gcount(); ++i) {
                 if (buffer1[i] != buffer2[i]) {
                     log("FOUND!");
                     return params.startOffset + lastReadOffset + i;
@@ -191,14 +217,15 @@ class FileChunk {
 };
 
 // nullopt if no difference
-ComparisonResult compareFiles(const std::filesystem::path& file1,
-                              const std::filesystem::path& file2,
-                              const ComparisonParams& params) {
+static ComparisonResult compareFiles(const std::filesystem::path& file1,
+                                     const std::filesystem::path& file2,
+                                     const ComparisonParams& params) {
     using namespace std;
 
     FileChunk fileChunk(file1, file2, params);
     if (! fileChunk.isOk()) {
-        return nullopt;
+        log("ERROR: Not \"OK\" chunk... cannot compare");
+        return {Result::Error, 0};
     }
 
     while (! fileChunk.isEnd()) {
@@ -206,23 +233,24 @@ ComparisonResult compareFiles(const std::filesystem::path& file1,
 
         if (! readResult) {
             log("WARN: Files are of different length");
-            return params.startOffset;
+            return {Result::OkDiff, params.startOffset};
         }
 
         if (*readResult == 0) {
+            log("WARN: Skip");
             break;
         }
 
         auto compareResult = fileChunk.compare(*readResult);
         if (compareResult.has_value()) {
-            return compareResult;
+            return {Result::OkDiff, *compareResult};
         }
     }
 
-    return nullopt;
+    return {Result::OkSame, params.startOffset};
 }
 
-std::optional<std::size_t> parseNumArg(const char* str) {
+static std::optional<std::size_t> parseNumArg(const char* str) {
     if (std::strlen(str) == 0 || std::strlen(str) > 15) {
         log("Invalid number");
         return std::nullopt;
@@ -236,49 +264,74 @@ std::optional<std::size_t> parseNumArg(const char* str) {
     return std::stoul(str);
 }
 
-int main(int argc, char** argv) {
+struct Args {
     std::filesystem::path file1;
     std::filesystem::path file2;
+    std::size_t taskCount      = 2ULL;
+    std::size_t availableBytes = taskCount * 4096;
+};
+
+static std::optional<Args> parseArgs(int argc, char** argv) {
+    Args res;
+    std::optional<Args> err = std::nullopt;
 
     if (argc < 3) {
-        std::cerr << "Usage: " << argv[0]
-                  << " <file1> <file2> [taskCount] [bytesAvailable]\n";
-        return 1;
+        log(std::format(
+            "Usage: {} <file1> <file2> [taskCount {}:{}] [bytesAvailable]",
+            argv[0], MIN_TASK, MAX_TASK));
+        log("Status code 0 - files are the same\n1 - files differ\n2 - usage "
+            "error\n3 - other error (usually file errors)");
+        return err;
     }
 
-    file1 = argv[1];
-    file2 = argv[2];
+    res.file1 = argv[1];
+    res.file2 = argv[2];
+
+    if (! std::filesystem::exists(res.file1)) {
+        log("ERROR: File 1 does not exist");
+        return err;
+    } else if (! std::filesystem::exists(res.file2)) {
+        log("ERROR: File 2 does not exist");
+        return err;
+    }
+
+    if (argc > 3) {
+        auto num = parseNumArg(argv[3]).value_or(res.taskCount);
+        if (! num) {
+            log("ERROR: Invalid task count");
+            return err;
+        }
+
+        if (num < MIN_TASK || num > MAX_TASK) {
+            log(std::format("ERROR: task count allowed only from [{};{}]",
+                            MIN_TASK, MAX_TASK));
+            return err;
+        }
+        res.taskCount = num;
+    }
+
+    if (argc > 4) {
+        auto num = parseNumArg(argv[4]).value_or(res.availableBytes);
+        if (! num) {
+            log("ERROR: Invalid available bytes");
+            return err;
+        }
+        res.availableBytes = num;
+    }
+
+    return res;
+}
+
+int main(int argc, char** argv) {
+    auto args = parseArgs(argc, argv);
+    if (! args) {
+        return E_USAGE;
+    }
+
+    auto&& [file1, file2, taskCount, availableBytes] = *args;
 
     if (file1 == file2) {
-        log("ERROR: Files are the same");
-        return 0;
-    }
-    if (! std::filesystem::exists(file1)) {
-        log("ERROR: File 1 does not exist");
-        return 1;
-    } else if (! std::filesystem::exists(file2)) {
-        log("ERROR: File 2 does not exist");
-        return 1;
-    }
-
-    std::size_t taskCount = 2ULL;
-    if (argc > 3) {
-        auto res = parseNumArg(argv[3]).value_or(taskCount);
-        if (! res) {
-            log("ERROR: Invalid task count");
-            return 1;
-        }
-        taskCount = res;
-    }
-
-    std::size_t availableBytes = taskCount * 4096;
-    if (argc > 4) {
-        auto res = parseNumArg(argv[4]).value_or(availableBytes);
-        if (! res) {
-            log("ERROR: Invalid available bytes");
-            return 1;
-        }
-        availableBytes = res;
+        return E_OK;
     }
 
     std::vector<std::future<ComparisonResult>> tasks;
@@ -288,7 +341,7 @@ int main(int argc, char** argv) {
     if (std::size_t fileSize2 = std::filesystem::file_size(file2);
         fileSize1 != fileSize2) {
         log("ERROR: Files are of different length");
-        return 1;
+        return E_USAGE;
     }
 
     std::size_t memoryPerTask = availableBytes / taskCount;
@@ -296,7 +349,7 @@ int main(int argc, char** argv) {
     if (availableBytes % taskCount != 0 || memoryPerTask == 0 ||
         memoryPerTask % 2 != 0) {
         log("ERROR: Available bytes is not divisible by (task count * 2)");
-        return 1;
+        return E_USAGE;
     }
 
 #ifdef MEASUREMENTS
@@ -314,6 +367,10 @@ int main(int argc, char** argv) {
 
     for (std::size_t i = 0; i < taskCount; ++i) {
         std::size_t startOffset = i * chunkSize;
+        if (startOffset >= fileSize1) {
+            break;
+        }
+
         std::size_t realChunkSize =
             std::min(chunkSize, fileSize1 - startOffset);
 
@@ -327,13 +384,18 @@ int main(int argc, char** argv) {
         task.wait();
     }
 
-    int ret = 0;
+    int ret = E_OK;
     for (auto& task : tasks) {
-        auto result = task.get();
-        if (result) {
-            log(std::format("Files differ at offset {}",
-                            std::to_string(result.value())));
-            ret = 1;
+        using enum Result;
+        auto&& [status, offset] = task.get();
+        if (status == OkDiff) {
+            log(std::format("Files differ at offset {}", offset));
+            ret = E_DIFFERENT;
+        } else if (status == Error) {
+            ret = E_OTHER;
+        }
+
+        if (status != OkSame) {
             break;
         }
     }

@@ -116,6 +116,7 @@ if __name__ == "__main__":
   print(f"  file_size: {file_size}")
   print(f"  num_passes: {num_passes}")
   print(f"  memory: {memory}")
+  print(f"  thread_count: {thread_count}")
 
   print("Check the files:")
   print(f"{FILENAME_1}")
